@@ -1,0 +1,8 @@
+.idea/
+cmake-build-*/
+mega-duck.cbp
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/Makefile
+**/CMakeFiles
+**/CTestTestfile.cmake
