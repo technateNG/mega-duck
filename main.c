@@ -3,6 +3,7 @@
 #include <avr/wdt.h>
 #include <avr/eeprom.h>
 #include <util/delay.h>
+#include <string.h>
 #include "usbdrv.h"
 #include "usb_hid_keys.h"
 #include "keyboard_descriptors.h"
@@ -13,53 +14,63 @@
 #define MODE_KEYBOARD 0xff
 #define PAYLOAD_BUFFER_LEN 512
 
+typedef enum
+{
+    NONE,
+    END,
+    TIME,
+    MOD
+} event_t;
+
+
 static keyboard_report_t keyboard_report;
 static uint8_t idle_rate;
 static uint8_t mode;
-static uint16_t current_eeprom_address;
-static uint16_t payload_pos;
+static uint16_t eeprom_read_pos;
+static uint16_t eeprom_write_pos;
 static uint8_t payload_buffer[PAYLOAD_BUFFER_LEN];
+static event_t event;
 
 usbMsgLen_t keyboard_usb_function_descriptor(usbRequest_t* rq)
 {
     switch (rq->wValue.bytes[1])
     {
         case USBDESCR_HID:
-        {
-            usbMsgPtr = (usbMsgPtr_t) keyboard_config_descriptor + 25;
-            return HID_DESCRIPTOR_LEN;
-        }
-        case USBDESCR_CONFIG:
-        {
-            usbMsgPtr = (usbMsgPtr_t) keyboard_config_descriptor;
-            return KEYBOARD_CONFIG_TOTAL_LEN;
-        }
-        case USBDESCR_HID_REPORT:
-        {
-            usbMsgPtr = (usbMsgPtr_t) keyboard_hid_report_descriptor;
-            return KEYBOARD_HID_REPORT_DESCRIPTOR_LEN;
-        }
-        case USBDESCR_DEVICE:
-        {
-            usbMsgPtr = (usbMsgPtr_t) keyboard_device_descriptor;
-            return KEYBOARD_DEVICE_DESCRIPTOR_LEN;
-        }
-        default:
-        {
-            switch (rq->wValue.bytes[0])
             {
-                case 1:
+                usbMsgPtr = (usbMsgPtr_t) keyboard_config_descriptor + 25;
+                return HID_DESCRIPTOR_LEN;
+            }
+        case USBDESCR_CONFIG:
+            {
+                usbMsgPtr = (usbMsgPtr_t) keyboard_config_descriptor;
+                return KEYBOARD_CONFIG_TOTAL_LEN;
+            }
+        case USBDESCR_HID_REPORT:
+            {
+                usbMsgPtr = (usbMsgPtr_t) keyboard_hid_report_descriptor;
+                return KEYBOARD_HID_REPORT_DESCRIPTOR_LEN;
+            }
+        case USBDESCR_DEVICE:
+            {
+                usbMsgPtr = (usbMsgPtr_t) keyboard_device_descriptor;
+                return KEYBOARD_DEVICE_DESCRIPTOR_LEN;
+            }
+        default:
+            {
+                switch (rq->wValue.bytes[0])
                 {
-                    usbMsgPtr = (usbMsgPtr_t) keyboard_string_vendor_descriptor;
-                    return KEYBOARD_STRING_VENDOR_DESCRIPTOR_LEN;
-                }
-                case 2:
-                {
-                    usbMsgPtr = (usbMsgPtr_t) keyboard_string_product_descriptor;
-                    return KEYBOARD_STRING_PRODUCT_DESCRIPTOR_LEN;
+                    case 1:
+                        {
+                            usbMsgPtr = (usbMsgPtr_t) keyboard_string_vendor_descriptor;
+                            return KEYBOARD_STRING_VENDOR_DESCRIPTOR_LEN;
+                        }
+                    case 2:
+                        {
+                            usbMsgPtr = (usbMsgPtr_t) keyboard_string_product_descriptor;
+                            return KEYBOARD_STRING_PRODUCT_DESCRIPTOR_LEN;
+                        }
                 }
             }
-        }
     }
     return 0;
 }
@@ -72,64 +83,77 @@ usbMsgLen_t keyboard_usb_function_setup(uchar data[8])
         switch (rq->bRequest)
         {
             case USBRQ_HID_GET_REPORT:
-            {
-                usbMsgPtr = (void*) &keyboard_report;
-                return sizeof(keyboard_report);
-            }
+                {
+                    usbMsgPtr = (void*) &keyboard_report;
+                    return sizeof(keyboard_report);
+                }
             case USBRQ_HID_SET_REPORT:
-            {
-                return (rq->wLength.word == 1) ? USB_NO_MSG : 0;
-            }
+                {
+                    return (rq->wLength.word == 1) ? USB_NO_MSG : 0;
+                }
             case USBRQ_HID_GET_IDLE:
-            {
-                usbMsgPtr = &idle_rate;
-                return 1;
-            }
+                {
+                    usbMsgPtr = &idle_rate;
+                    return 1;
+                }
             case USBRQ_HID_SET_IDLE:
-            {
-                idle_rate = rq->wValue.bytes[1];
-            }
+                {
+                    idle_rate = rq->wValue.bytes[1];
+                }
         }
     }
     return 0;
 }
 
-void keyboard_interrupter()
+void build_report()
 {
-    if (usbInterruptIsReady())
+    uint8_t i = 0;
+    while (i < 6)
     {
-        uint8_t i = 0;
-        while (i < 6)
+        switch (payload_buffer[eeprom_read_pos])
         {
-            switch (payload_buffer[payload_pos])
-            {
-                case '\0':
+            case 3:
                 {
+                    event = END;
                     return;
                 }
-                case 1:
+            case 1:
                 {
-                    ++payload_pos;
-                    keyboard_report.modifier = payload_buffer[payload_pos];
-                    ++payload_pos;
-                    keyboard_report.key_code[i] = payload_buffer[payload_pos];
+                    event = MOD;
+                    return;
                 }
-                case 2:
+            case 2:
                 {
-                    ++payload_pos;
-                    const uint8_t delay = payload_buffer[payload_pos];
-                    usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report));
-                    // TODO
+                    event = TIME;
+                    return;
                 }
-                default:
+            default:
                 {
-                    keyboard_report.key_code[i]
+                   keyboard_report.key_code[i] = payload_buffer[eeprom_read_pos]; 
                 }
-            }
-            ++i;
         }
-        usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report));
+        ++eeprom_read_pos;
+        ++i;	
     }
+}
+
+void keyboard_interrupter()
+{
+    memset(&keyboard_report, 0, sizeof(keyboard_report));
+    if (event == MOD)
+    {
+        event = NONE;
+        keyboard_report.modifier = payload_buffer[eeprom_read_pos + 1];
+        eeprom_read_pos += 2;
+    } 
+    else if (event == TIME)
+    {
+        event = NONE;
+        ++eeprom_read_pos; 
+        //TODO
+    }
+    build_report();
+    usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report));
 }
 
 usbMsgLen_t loader_usb_function_descriptor(usbRequest_t* rq)
@@ -137,41 +161,41 @@ usbMsgLen_t loader_usb_function_descriptor(usbRequest_t* rq)
     switch (rq->wValue.bytes[1])
     {
         case USBDESCR_HID:
-        {
-            usbMsgPtr = (usbMsgPtr_t) loader_config_descriptor + 25;
-            return HID_DESCRIPTOR_LEN;
-        }
-        case USBDESCR_CONFIG:
-        {
-            usbMsgPtr = (usbMsgPtr_t) loader_config_descriptor;
-            return LOADER_CONFIG_TOTAL_LEN;
-        }
-        case USBDESCR_HID_REPORT:
-        {
-            usbMsgPtr = (usbMsgPtr_t) loader_hid_report_descriptor;
-            return LOADER_HID_REPORT_DESCRIPTOR_LEN;
-        }
-        case USBDESCR_DEVICE:
-        {
-            usbMsgPtr = (usbMsgPtr_t) loader_device_descriptor;
-            return LOADER_DEVICE_DESCRIPTOR_LEN;
-        }
-        default:
-        {
-            switch (rq->wValue.bytes[0])
             {
-                case 1:
+                usbMsgPtr = (usbMsgPtr_t) loader_config_descriptor + 25;
+                return HID_DESCRIPTOR_LEN;
+            }
+        case USBDESCR_CONFIG:
+            {
+                usbMsgPtr = (usbMsgPtr_t) loader_config_descriptor;
+                return LOADER_CONFIG_TOTAL_LEN;
+            }
+        case USBDESCR_HID_REPORT:
+            {
+                usbMsgPtr = (usbMsgPtr_t) loader_hid_report_descriptor;
+                return LOADER_HID_REPORT_DESCRIPTOR_LEN;
+            }
+        case USBDESCR_DEVICE:
+            {
+                usbMsgPtr = (usbMsgPtr_t) loader_device_descriptor;
+                return LOADER_DEVICE_DESCRIPTOR_LEN;
+            }
+        default:
+            {
+                switch (rq->wValue.bytes[0])
                 {
-                    usbMsgPtr = (usbMsgPtr_t) loader_string_vendor_descriptor;
-                    return LOADER_STRING_VENDOR_DESCRIPTOR_LEN;
-                }
-                case 2:
-                {
-                    usbMsgPtr = (usbMsgPtr_t) loader_string_product_descriptor;
-                    return LOADER_STRING_PRODUCT_DESCRIPTOR_LEN;
+                    case 1:
+                        {
+                            usbMsgPtr = (usbMsgPtr_t) loader_string_vendor_descriptor;
+                            return LOADER_STRING_VENDOR_DESCRIPTOR_LEN;
+                        }
+                    case 2:
+                        {
+                            usbMsgPtr = (usbMsgPtr_t) loader_string_product_descriptor;
+                            return LOADER_STRING_PRODUCT_DESCRIPTOR_LEN;
+                        }
                 }
             }
-        }
     }
     return 0;
 }
@@ -218,24 +242,21 @@ usbMsgLen_t usbFunctionDescriptor(usbRequest_t* rq)
     }
 }
 
-usbMsgLen_t usbFunctionWrite(uint8_t* data, uchar len)
+usbMsgLen_t usbFunctionWrite(uint8_t data[], uchar len)
 {
     if (mode == MODE_LOADER)
     {
-        uint8_t was_reset = 0;
-        if (len && data[0] == '\0')
+        for (uint8_t i = 0; i < len; ++i)
         {
-            current_eeprom_address = 0;
-            was_reset = 1;
+            if (data[i] == 3 || eeprom_write_pos == 511)
+            {
+                eeprom_write_pos = 0;
+                return 1;
+            }
+            eeprom_update_byte(eeprom_write_pos, data[i]);
+            ++eeprom_write_pos;
         }
-        if (current_eeprom_address + len > 511)
-        {
-            len = 511 - current_eeprom_address;
-        }
-        eeprom_write_block(data + was_reset,
-                           (uint8_t*) 0 + current_eeprom_address,
-                           len);
-        current_eeprom_address += len;  //BABOL
+        return 0;
     }
     return 1;
 }
@@ -260,10 +281,10 @@ void usb_device_restart()
 
 uint8_t check_mode()
 {
-     return bit_is_set(PINC, PC1) ? MODE_KEYBOARD : MODE_LOADER;
+    return bit_is_set(PINC, PC1) ? MODE_KEYBOARD : MODE_LOADER;
 }
 
-NO_RETURN
+    NO_RETURN
 int main()
 {
     PORTC |= 1u << PC1;
@@ -292,7 +313,10 @@ int main()
         }
         if (mode)
         {
-            keyboard_interrupter();
+            if (usbInterruptIsReady()) 
+            {
+                keyboard_interrupter();
+            }
         }
     }
 }
