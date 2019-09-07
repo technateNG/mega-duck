@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.13)
 project(mega-duck C ASM)
 
 set(MCU "atmega8")

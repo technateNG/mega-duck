@@ -22,7 +22,6 @@ typedef enum
     MOD
 } event_t;
 
-
 static keyboard_report_t keyboard_report;
 static uint8_t idle_rate;
 static uint8_t mode;
@@ -137,6 +136,18 @@ void build_report()
     }
 }
 
+void wait(uint8_t secs)
+{
+    for (uint8_t i = 0; i < secs; ++i)
+    {
+        for (uint8_t j = 0; j < 20; ++j)
+        {
+            usbPoll();
+            _delay_ms(5);
+        }
+    }
+}
+
 void keyboard_interrupter()
 {
     memset(&keyboard_report, 0, sizeof(keyboard_report));
@@ -149,8 +160,8 @@ void keyboard_interrupter()
     else if (event == TIME)
     {
         event = NONE;
-        ++eeprom_read_pos; 
-        //TODO
+        wait(payload_buffer[eeprom_read_pos + 1]);
+        eeprom_read_pos += 2;
     }
     build_report();
     usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report));
@@ -253,7 +264,7 @@ usbMsgLen_t usbFunctionWrite(uint8_t data[], uchar len)
                 eeprom_write_pos = 0;
                 return 1;
             }
-            eeprom_update_byte(eeprom_write_pos, data[i]);
+            eeprom_update_byte((uint8_t*) 0 + eeprom_write_pos, data[i]);
             ++eeprom_write_pos;
         }
         return 0;
