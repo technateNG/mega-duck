@@ -3,6 +3,8 @@ cmake-build-*/
 mega-duck.cbp
 mega-duck
 mega-duck.hex
+cmdline
+tags
 **/CMakeCache.txt
 **/cmake_install.cmake
 **/Makefile
