@@ -30,7 +30,7 @@ static uint16_t eeprom_read_pos;
 static uint16_t eeprom_write_pos;
 static uint8_t payload_buffer[PAYLOAD_BUFFER_LEN];
 static event_t event;
-static bool send_zero_report = true;
+static bool send_zero_report;
 
 usbMsgLen_t keyboard_usb_function_descriptor(usbRequest_t* rq)
 {
@@ -138,12 +138,14 @@ void build_report()
     }
 }
 
+//TODO BROKEN IMPLEMENTATION
 void wait(uint8_t secs)
 {
     for (uint8_t i = 0; i < secs; ++i)
     {
         for (uint8_t j = 0; j < 20; ++j)
         {
+            wdt_reset();
             usbPoll();
             _delay_ms(5);
         }
@@ -161,7 +163,7 @@ void keyboard_interrupter()
     else if (event == TIME)
     {
         event = NONE;
-        wait(payload_buffer[eeprom_read_pos + 1]);
+        //wait(payload_buffer[eeprom_read_pos + 1]);
         eeprom_read_pos += 2;
     }
     build_report();
@@ -302,9 +304,6 @@ uint8_t check_mode()
 {
     return bit_is_set(PINC, PC1) ? MODE_KEYBOARD : MODE_LOADER;
 }
-#define BUF_SIZE 8
-
-uint8_t buf[BUF_SIZE] = {KEY_A, KEY_NONE, KEY_B, KEY_NONE, KEY_C, KEY_NONE, KEY_D, KEY_NONE};
 
 int NO_RETURN main()
 {
@@ -319,6 +318,7 @@ int NO_RETURN main()
     }
     usbInit();
     usb_device_restart();
+    wait(5);
     for (;;)
     {
         wdt_reset();
@@ -333,12 +333,9 @@ int NO_RETURN main()
                 eeprom_read_block(payload_buffer, (uint8_t*) 0, PAYLOAD_BUFFER_LEN);
             }
         }
-        if (mode && z < BUF_SIZE && usbInterruptIsReady()) 
+        if (mode && usbInterruptIsReady()) 
         {
-            keyboard_report.key_code[0] = buf[z];  
-            usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report));
-            ++z;
-            /*if (send_zero_report)
+            if (send_zero_report)
             {
                 memset(&keyboard_report, 0, sizeof(keyboard_report));
                 usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report));   
@@ -347,7 +344,7 @@ int NO_RETURN main()
             else if (event != END) 
             {
                 keyboard_interrupter();
-            }*/
+            }
         }
     }
 }
