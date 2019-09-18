@@ -15,7 +15,7 @@
 #define MODE_KEYBOARD 0xff
 #define PAYLOAD_BUFFER_LEN 512
 
-typedef enum
+typedef enum event_t
 {
     NONE = 0,
     MOD = 1,
@@ -135,20 +135,6 @@ void build_report()
         }
         ++eeprom_read_pos;
         ++i;	
-    }
-}
-
-//TODO BROKEN IMPLEMENTATION
-void wait(uint8_t secs)
-{
-    for (uint8_t i = 0; i < secs; ++i)
-    {
-        for (uint8_t j = 0; j < 20; ++j)
-        {
-            wdt_reset();
-            usbPoll();
-            _delay_ms(5);
-        }
     }
 }
 
@@ -308,17 +294,19 @@ uint8_t check_mode()
 int NO_RETURN main()
 {
     PORTC |= 1u << PC1;
+    
+    bool overflow = false; 
     eeprom_busy_wait();
     wdt_enable(WDTO_1S);
     mode = check_mode();
-    uint8_t z = 0;
     if (mode)
     {
         eeprom_read_block(payload_buffer, (uint8_t*) 0, PAYLOAD_BUFFER_LEN);
     }
     usbInit();
     usb_device_restart();
-    wait(5);
+    TCCR1B = (1 << CS10) | (1 << CS12);
+    TCNT1 = 0;
     for (;;)
     {
         wdt_reset();
@@ -333,7 +321,13 @@ int NO_RETURN main()
                 eeprom_read_block(payload_buffer, (uint8_t*) 0, PAYLOAD_BUFFER_LEN);
             }
         }
-        if (mode && usbInterruptIsReady()) 
+        if (TIFR & (1 << TOV1))
+        {
+            overflow = true;
+            TIFR |= (1 << TOV1);
+            TCCR1B = 0;
+        }
+        if (overflow && mode && usbInterruptIsReady()) 
         {
             if (send_zero_report)
             {
