@@ -11,26 +11,16 @@
 #include "loader_descriptors.h"
 
 #define NO_RETURN __attribute__((noreturn))
+#define ALWAYS_INLINE __attribute__((always_inline))
 #define MODE_LOADER 0
 #define MODE_KEYBOARD 0xff
 #define PAYLOAD_BUFFER_LEN 512
 
-typedef enum event_t
-{
-    NONE = 0,
-    MOD = 1,
-    TIME = 2,
-    END = 3,
-} event_t;
-
 static keyboard_report_t keyboard_report;
 static uint8_t idle_rate;
 static uint8_t mode;
-static uint16_t eeprom_read_pos;
 static uint16_t eeprom_write_pos;
 static uint8_t payload_buffer[PAYLOAD_BUFFER_LEN];
-static event_t event;
-static bool send_zero_report;
 
 usbMsgLen_t keyboard_usb_function_descriptor(usbRequest_t* rq)
 {
@@ -104,57 +94,6 @@ usbMsgLen_t keyboard_usb_function_setup(uchar data[8])
         }
     }
     return 0;
-}
-
-void build_report()
-{
-    uint8_t i = 0;
-    while (i < 6)
-    {
-        switch (payload_buffer[eeprom_read_pos])
-        {
-            case 3:
-                {
-                    event = END;
-                    return;
-                }
-            case 1:
-                {
-                    event = MOD;
-                    return;
-                }
-            case 2:
-                {
-                    event = TIME;
-                    return;
-                }
-            default:
-                {
-                    keyboard_report.key_code[i] = payload_buffer[eeprom_read_pos]; 
-                }
-        }
-        ++eeprom_read_pos;
-        ++i;	
-    }
-}
-
-void keyboard_interrupter()
-{
-    if (event == MOD)
-    {
-        event = NONE;
-        keyboard_report.modifier = payload_buffer[eeprom_read_pos + 1];
-        eeprom_read_pos += 2;
-    } 
-    else if (event == TIME)
-    {
-        event = NONE;
-        //wait(payload_buffer[eeprom_read_pos + 1]);
-        eeprom_read_pos += 2;
-    }
-    build_report();
-    usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report));
-    send_zero_report = true;
 }
 
 usbMsgLen_t loader_usb_function_descriptor(usbRequest_t* rq)
@@ -255,7 +194,7 @@ usbMsgLen_t usbFunctionWrite(uint8_t data[], uchar len)
                 return 1;
             }
             eeprom_update_byte((uint8_t*) 0 + eeprom_write_pos, data[i]);
-            if (data[i] == 3)
+            if (data[i] == 0xff)
             {
                 eeprom_write_pos = 0;
                 return 1;
@@ -273,7 +212,7 @@ usbMsgLen_t usbFunctionRead(uchar *data, uchar len)
     return 1;
 }
 
-void usb_device_restart()
+static inline void usb_device_restart()
 {
     cli();
     usbDeviceDisconnect();
@@ -286,7 +225,7 @@ void usb_device_restart()
     sei();
 }
 
-uint8_t check_mode()
+static inline uint8_t check_mode()
 {
     return bit_is_set(PINC, PC1) ? MODE_KEYBOARD : MODE_LOADER;
 }
@@ -294,19 +233,21 @@ uint8_t check_mode()
 int NO_RETURN main()
 {
     PORTC |= 1u << PC1;
-    
-    bool overflow = false; 
     eeprom_busy_wait();
     wdt_enable(WDTO_1S);
+    
     mode = check_mode();
     if (mode)
     {
         eeprom_read_block(payload_buffer, (uint8_t*) 0, PAYLOAD_BUFFER_LEN);
     }
+    
     usbInit();
     usb_device_restart();
-    TCCR1B = (1 << CS10) | (1 << CS12);
-    TCNT1 = 0;
+
+    bool can_interrupt = true; 
+    bool send_zero_report = false;
+    uint16_t eeprom_read_pos = 0;
     for (;;)
     {
         wdt_reset();
@@ -321,23 +262,43 @@ int NO_RETURN main()
                 eeprom_read_block(payload_buffer, (uint8_t*) 0, PAYLOAD_BUFFER_LEN);
             }
         }
-        if (TIFR & (1 << TOV1))
+        if (TIFR & (1 << OCF1A))
         {
-            overflow = true;
-            TIFR |= (1 << TOV1);
+            can_interrupt = true;
+            TIFR |= (1 << OCF1A);
             TCCR1B = 0;
-        }
-        if (overflow && mode && usbInterruptIsReady()) 
+        } 
+        if (mode && can_interrupt && usbInterruptIsReady()) 
         {
             if (send_zero_report)
             {
-                memset(&keyboard_report, 0, sizeof(keyboard_report));
-                usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report));   
+                memset(&keyboard_report, 0, sizeof(keyboard_report_t));
+                usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report_t));   
                 send_zero_report = false;
-            }
-            else if (event != END) 
+            } 
+            else if (payload_buffer[eeprom_read_pos] == 0x02)
             {
-                keyboard_interrupter();
+                TCCR1B = (1 << CS10) | (1 << CS12);
+                OCR1A = payload_buffer[eeprom_read_pos + 1] * 15625;
+                TCNT1 = 0;
+                can_interrupt = false;
+                eeprom_read_pos += 2;
+            }
+            else if (payload_buffer[eeprom_read_pos] == 0xff)
+            {
+                can_interrupt = false;
+            }
+            else 
+            {
+                if (payload_buffer[eeprom_read_pos] == 0x01)
+                {
+                    keyboard_report.modifier = payload_buffer[eeprom_read_pos + 1];
+                    eeprom_read_pos += 2; 
+                }
+                keyboard_report.key_code[0] = payload_buffer[eeprom_read_pos];
+                usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report_t));   
+		++eeprom_read_pos; 
+                send_zero_report = true;
             }
         }
     }

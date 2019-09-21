@@ -9,6 +9,17 @@ char buffer[512];
 
 typedef unsigned char uchar;
 
+size_t find(uchar buffer[static 1], size_t size, uchar val)
+{
+    for (size_t i = 0; i < size; ++i)
+    {
+        if (buffer[i] == val)
+        {
+            return i;   
+        }
+    }
+}
+
 int main(void)
 {
     libusb_device** list;
@@ -55,8 +66,9 @@ int main(void)
         return 1;
     }
     puts("[*] Duck loader found. Waiting for payload.");
-    memset(buffer, 0, sizeof(buffer));
+    memset(buffer, 0xff, sizeof(buffer));
     fgets(buffer, 512, stdin);
+    size_t msg_len = find(buffer, 512, 0xff);
     puts("[*] Payload received. Parsing...");
     puts("[*] Payload parsed. Sending transfer.");
     libusb_control_transfer(
@@ -68,7 +80,7 @@ int main(void)
 	    HID_REPORT_TYPE_FEATURE << 8,
 	    0,
 	    buffer,
-	    6,
+	    msg_len + 1,
 	    5000);
     puts("[*] Payload succesfully written to device.");
     libusb_free_device_list(list, 1);
