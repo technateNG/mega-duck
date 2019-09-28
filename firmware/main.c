@@ -11,7 +11,7 @@
 
 #define NO_RETURN __attribute__((noreturn))
 #define ALWAYS_INLINE __attribute__((always_inline))
-#define PAYLOAD_BUFFER_LEN 512
+#define PAYLOAD_LEN 512
 #define ONE_SECOND 15625
 
 typedef enum Mode
@@ -22,7 +22,6 @@ typedef enum Mode
 
 typedef enum Token
 {
-
     MODIFIER = 0x01,
     TIME = 0x02,
     END_OF_STREAM = 0xff,
@@ -30,7 +29,7 @@ typedef enum Token
 
 static mode_t mode;
 static uint16_t eeprom_write_pos;
-static uint8_t payload_buffer[PAYLOAD_BUFFER_LEN];
+static uint8_t payload[PAYLOAD_LEN];
 
 usbMsgLen_t usbFunctionSetup(uchar data[8])
 {
@@ -58,7 +57,7 @@ usbMsgLen_t usbFunctionWrite(uint8_t data[], uchar len)
     }
     for (uint8_t i = 0; i < len; ++i)
     {
-        if (eeprom_write_pos == PAYLOAD_BUFFER_LEN)
+        if (eeprom_write_pos == PAYLOAD_LEN)
         {
             eeprom_write_pos = 0;
             return 1;
@@ -128,7 +127,7 @@ int main()
     mode = check_mode();
     if (mode == LOADER)
     {
-        eeprom_read_block(payload_buffer, (uint8_t*) 0, PAYLOAD_BUFFER_LEN);
+        eeprom_read_block(payload, (uint8_t*) 0, PAYLOAD_LEN);
     }
 
     usbInit();
@@ -148,7 +147,7 @@ int main()
             mode = actual_mode_flag;
             if (mode == LOADER)
             {
-                eeprom_read_block(payload_buffer, (uint8_t*) 0, PAYLOAD_BUFFER_LEN);
+                eeprom_read_block(payload, (uint8_t*) 0, PAYLOAD_LEN);
             }
         }
         if (TIFR & (1 << OCF1A))
@@ -164,25 +163,25 @@ int main()
                 usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report_t));
                 send_zero_report = false;
             }
-            else if (payload_buffer[eeprom_read_pos] == TIME)
+            else if (payload[eeprom_read_pos] == TIME)
             {
-                OCR1A = payload_buffer[eeprom_read_pos + 1] * ONE_SECOND;
+                OCR1A = payload[eeprom_read_pos + 1] * ONE_SECOND;
                 start_clock();
                 can_interrupt = false;
                 eeprom_read_pos += 2;
             }
-            else if (payload_buffer[eeprom_read_pos] == END_OF_STREAM)
+            else if (payload[eeprom_read_pos] == END_OF_STREAM)
             {
                 can_interrupt = false;
             }
             else
             {
-                if (payload_buffer[eeprom_read_pos] == MODIFIER)
+                if (payload[eeprom_read_pos] == MODIFIER)
                 {
-                    keyboard_report.modifier = payload_buffer[eeprom_read_pos + 1];
+                    keyboard_report.modifier = payload[eeprom_read_pos + 1];
                     eeprom_read_pos += 2;
                 }
-                keyboard_report.key_code[0] = payload_buffer[eeprom_read_pos];
+                keyboard_report.key_code[0] = payload[eeprom_read_pos];
                 usbSetInterrupt((void*) &keyboard_report, sizeof(keyboard_report_t));
                 ++eeprom_read_pos;
                 send_zero_report = true;

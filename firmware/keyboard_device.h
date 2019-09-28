@@ -29,7 +29,7 @@ static const int keyboard_string_product_descriptor[14];
 PROGMEM
 static const uint8_t keyboard_config_descriptor[KEYBOARD_CONFIG_TOTAL_LEN];
 
-typedef struct
+typedef struct KeyboardReport
 {
     uint8_t modifier;
     uint8_t reserved;
