@@ -1,14 +1,4 @@
-#ifndef MEGA_DUCK_LOADER_DESCRIPTORS_H
-#define MEGA_DUCK_LOADER_DESCRIPTORS_H
-
-#define LOADER_HID_REPORT_DESCRIPTOR_LEN 22
-#define LOADER_INTER_DESCRIPTOR_LEN 9
-#define LOADER_ENDPOINT_DESCRIPTOR_LEN 7
-#define LOADER_CONFIG_DESCRIPTOR_LEN 9
-#define LOADER_CONFIG_TOTAL_LEN 34
-#define LOADER_DEVICE_DESCRIPTOR_LEN 18
-#define LOADER_STRING_VENDOR_DESCRIPTOR_LEN sizeof(loader_string_vendor_descriptor)
-#define LOADER_STRING_PRODUCT_DESCRIPTOR_LEN sizeof(loader_string_product_descriptor)
+#include "loader_device.h"
 
 PROGMEM
 const uint8_t loader_hid_report_descriptor[LOADER_HID_REPORT_DESCRIPTOR_LEN] = {
@@ -56,7 +46,7 @@ static const int loader_string_product_descriptor[] = {
 
 PROGMEM
 static const uint8_t loader_config_descriptor[LOADER_CONFIG_TOTAL_LEN] = {
-        KEYBOARD_CONFIG_DESCRIPTOR_LEN,           /* Length */
+        LOADER_CONFIG_DESCRIPTOR_LEN,             /* Length */
         USBDESCR_CONFIG,                          /* Descriptor Type: Configuration */
         (LOADER_CONFIG_DESCRIPTOR_LEN +
          HID_DESCRIPTOR_LEN +
@@ -90,4 +80,63 @@ static const uint8_t loader_config_descriptor[LOADER_CONFIG_TOTAL_LEN] = {
         0x22,                                     /* Report descriptor type */
         0x16, 0x00                                /* Total length of report HID */
 };
-#endif //MEGA_DUCK_LOADER_DESCRIPTORS_H
+
+
+
+usbMsgLen_t loader_usb_function_descriptor(usbRequest_t* rq)
+{
+    switch (rq->wValue.bytes[1])
+    {
+        case USBDESCR_HID:
+        {
+            usbMsgPtr = (usbMsgPtr_t) loader_config_descriptor + 25;
+            return HID_DESCRIPTOR_LEN;
+        }
+        case USBDESCR_CONFIG:
+        {
+            usbMsgPtr = (usbMsgPtr_t) loader_config_descriptor;
+            return LOADER_CONFIG_TOTAL_LEN;
+        }
+        case USBDESCR_HID_REPORT:
+        {
+            usbMsgPtr = (usbMsgPtr_t) loader_hid_report_descriptor;
+            return LOADER_HID_REPORT_DESCRIPTOR_LEN;
+        }
+        case USBDESCR_DEVICE:
+        {
+            usbMsgPtr = (usbMsgPtr_t) loader_device_descriptor;
+            return LOADER_DEVICE_DESCRIPTOR_LEN;
+        }
+        default:
+        {
+            switch (rq->wValue.bytes[0])
+            {
+                case 1:
+                {
+                    usbMsgPtr = (usbMsgPtr_t) loader_string_vendor_descriptor;
+                    return LOADER_STRING_VENDOR_DESCRIPTOR_LEN;
+                }
+                case 2:
+                {
+                    usbMsgPtr = (usbMsgPtr_t) loader_string_product_descriptor;
+                    return LOADER_STRING_PRODUCT_DESCRIPTOR_LEN;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+usbMsgLen_t loader_usb_function_setup(uchar data[8])
+{
+    usbRequest_t* rq = (void*) data;
+
+    if ((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS)
+    {
+        if (rq->bRequest == USBRQ_HID_GET_REPORT || rq->bRequest == USBRQ_HID_SET_REPORT)
+        {
+            return USB_NO_MSG;
+        }
+    }
+    return 0;
+}

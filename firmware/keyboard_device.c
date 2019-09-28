@@ -1,17 +1,5 @@
-#ifndef MEGA_DUCK_KEYBOARD_DESCRIPTORS_HPP
-#define MEGA_DUCK_KEYBOARD_DESCRIPTORS_HPP
-
-#include <avr/pgmspace.h>
-
-#define KEYBOARD_HID_REPORT_DESCRIPTOR_LEN 63
-#define KEYBOARD_INTER_DESCRIPTOR_LEN 9
-#define KEYBOARD_ENDPOINT_DESCRIPTOR_LEN 7
-#define KEYBOARD_CONFIG_DESCRIPTOR_LEN 9
-#define KEYBOARD_CONFIG_TOTAL_LEN 34
-#define KEYBOARD_DEVICE_DESCRIPTOR_LEN 18
-#define HID_DESCRIPTOR_LEN 9
-#define KEYBOARD_STRING_VENDOR_DESCRIPTOR_LEN sizeof(keyboard_string_vendor_descriptor)
-#define KEYBOARD_STRING_PRODUCT_DESCRIPTOR_LEN sizeof(keyboard_string_product_descriptor)
+#include "usbdrv.h"
+#include "keyboard_device.h"
 
 PROGMEM
 static const uint8_t keyboard_hid_report_descriptor[KEYBOARD_HID_REPORT_DESCRIPTOR_LEN] = {
@@ -116,12 +104,77 @@ static const uint8_t keyboard_config_descriptor[KEYBOARD_CONFIG_TOTAL_LEN] = {
         0x3f, 0x00                                /* Total length of report HID */
 };
 
-typedef struct
+
+usbMsgLen_t keyboard_usb_function_descriptor(usbRequest_t* rq)
 {
-    uint8_t modifier;
-    uint8_t reserved;
-    uint8_t key_code[6];
-} keyboard_report_t;
+    switch (rq->wValue.bytes[1])
+    {
+        case USBDESCR_HID:
+        {
+            usbMsgPtr = (usbMsgPtr_t) keyboard_config_descriptor + 25;
+            return HID_DESCRIPTOR_LEN;
+        }
+        case USBDESCR_CONFIG:
+        {
+            usbMsgPtr = (usbMsgPtr_t) keyboard_config_descriptor;
+            return KEYBOARD_CONFIG_TOTAL_LEN;
+        }
+        case USBDESCR_HID_REPORT:
+        {
+            usbMsgPtr = (usbMsgPtr_t) keyboard_hid_report_descriptor;
+            return KEYBOARD_HID_REPORT_DESCRIPTOR_LEN;
+        }
+        case USBDESCR_DEVICE:
+        {
+            usbMsgPtr = (usbMsgPtr_t) keyboard_device_descriptor;
+            return KEYBOARD_DEVICE_DESCRIPTOR_LEN;
+        }
+        default:
+        {
+            switch (rq->wValue.bytes[0])
+            {
+                case 1:
+                {
+                    usbMsgPtr = (usbMsgPtr_t) keyboard_string_vendor_descriptor;
+                    return KEYBOARD_STRING_VENDOR_DESCRIPTOR_LEN;
+                }
+                case 2:
+                {
+                    usbMsgPtr = (usbMsgPtr_t) keyboard_string_product_descriptor;
+                    return KEYBOARD_STRING_PRODUCT_DESCRIPTOR_LEN;
+                }
+            }
+        }
+    }
+    return 0;
+}
 
-
-#endif //MEGA_DUCK_KEYBOARD_DESCRIPTORS_HPP
+usbMsgLen_t keyboard_usb_function_setup(uchar data[8])
+{
+    usbRequest_t* rq = (void*) data;
+    if ((rq->bmRequestType & USBRQ_TYPE_MASK) == USBRQ_TYPE_CLASS)
+    {
+        switch (rq->bRequest)
+        {
+            case USBRQ_HID_GET_REPORT:
+            {
+                usbMsgPtr = (void*) &keyboard_report;
+                return sizeof(keyboard_report);
+            }
+            case USBRQ_HID_SET_REPORT:
+            {
+                return (rq->wLength.word == 1) ? USB_NO_MSG : 0;
+            }
+            case USBRQ_HID_GET_IDLE:
+            {
+                usbMsgPtr = &idle_rate;
+                return 1;
+            }
+            case USBRQ_HID_SET_IDLE:
+            {
+                idle_rate = rq->wValue.bytes[1];
+            }
+        }
+    }
+    return 0;
+}

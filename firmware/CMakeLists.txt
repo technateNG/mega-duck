@@ -7,6 +7,8 @@ add_executable(mega-duck)
 target_sources(mega-duck
         PRIVATE
         main.c
+        keyboard_device.c
+        loader_device.c
         usbdrv.c
         usbdrvasm.S
         )
