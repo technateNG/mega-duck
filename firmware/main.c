@@ -125,7 +125,7 @@ int main()
     wdt_enable(WDTO_1S);
 
     mode = check_mode();
-    if (mode == LOADER)
+    if (mode == KEYBOARD)
     {
         eeprom_read_block(payload, (uint8_t*) 0, PAYLOAD_LEN);
     }
